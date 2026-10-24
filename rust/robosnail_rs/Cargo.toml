@@ -2,6 +2,7 @@
 name = "robosnail_rs"
 version = "0.1.0"
 edition = "2021"
+authors = ["Noah Cohen"]
 description = "Allocation-free #![no_std] Rust arena kernel for embodied robotics, contact-chain sheaves, 2mm cable glare filter, and so(16) Cayley rotor TTT"
 license = "CC0-1.0"
 

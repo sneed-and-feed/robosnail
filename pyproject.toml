@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "robosnail"
 version = "0.1.0"
 description = "Embodied Robotics Spoke: Contact-Chain Sheaf, 2mm Cable Glare Filter, and so(16) Cayley Rotor TTT"
+authors = [{ name = "Noah Cohen" }]
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}

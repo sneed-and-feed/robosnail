@@ -188,7 +188,7 @@ Open [`studio/robosnail_portable_studio.html`](studio/robosnail_portable_studio.
 
 ```bibtex
 @software{robosnail_2026,
-  author       = {Skates, Cthulhu},
+  author       = {Cohen, Noah},
   title        = {RoboSnail: Embodied Robotics Spoke for Contact-Chain Sheaf Propagation, 2mm Cable Glare Suppression and Online so(16) Cayley Rotor Adaptation},
   year         = {2026},
   version      = {0.1.0},

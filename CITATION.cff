@@ -3,8 +3,8 @@ title: "RoboSnail: Embodied Robotics Spoke for Contact-Chain Sheaf Propagation, 
 message: "If you use this software, please cite it using the metadata from this file."
 type: software
 authors:
-  - family-names: Skates
-    given-names: Cthulhu
+  - family-names: "Cohen"
+    given-names: "Noah"
 version: 0.1.0
 date-released: 2026-10-24
 license: MIT
