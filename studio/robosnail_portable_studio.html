@@ -240,13 +240,13 @@ input[type="range"] {
       <h3>Kinematic Chain Actuator</h3>
       <div class="btn-grid">
         <div></div>
-        <button class="ctrl-btn" onclick="actuateEgo(0, -1)">▲ UP</button>
+        <button class="ctrl-btn" id="btn-up" onclick="actuateEgo(0, 1)">▲ UP</button>
         <div></div>
-        <button class="ctrl-btn" onclick="actuateEgo(-1, 0)">◀ LEFT</button>
-        <button class="ctrl-btn" onclick="resetPositions()">RESET</button>
-        <button class="ctrl-btn" onclick="actuateEgo(1, 0)">RIGHT ▶</button>
+        <button class="ctrl-btn" id="btn-left" onclick="actuateEgo(-1, 0)">◀ LEFT</button>
+        <button class="ctrl-btn" id="btn-reset" onclick="resetPositions()">RESET</button>
+        <button class="ctrl-btn" id="btn-right" onclick="actuateEgo(1, 0)">RIGHT ▶</button>
         <div></div>
-        <button class="ctrl-btn" onclick="actuateEgo(0, 1)">▼ DOWN</button>
+        <button class="ctrl-btn" id="btn-down" onclick="actuateEgo(0, -1)">▼ DOWN</button>
         <div></div>
       </div>
       <div style="margin-top: 8px;">
@@ -392,6 +392,24 @@ function toggleWall() {
   document.getElementById("stat-wall").innerText = wallLocked ? "ACTIVE (Immovable Boundary)" : "OFF (Free Push)";
   document.getElementById("stat-wall").style.color = wallLocked ? "var(--amber)" : "var(--text-bright)";
 }
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") {
+    e.preventDefault();
+    actuateEgo(0, 1);
+  } else if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") {
+    e.preventDefault();
+    actuateEgo(0, -1);
+  } else if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {
+    e.preventDefault();
+    actuateEgo(-1, 0);
+  } else if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {
+    e.preventDefault();
+    actuateEgo(1, 0);
+  } else if (e.key === "r" || e.key === "R") {
+    resetPositions();
+  }
+});
 
 function updateGlare(v) {
   glareIntensity = v / 100.0;

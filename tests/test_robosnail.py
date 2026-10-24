@@ -68,8 +68,14 @@ def test_scale_invariant_sheaf_cavity_csp():
 
 
 def test_kinematic_contact_sheaf_propagation():
-    """Verify forward kinematic contact chain displacement propagation."""
+    """Verify forward kinematic contact chain displacement propagation and studio UP/DOWN orientation."""
     bridge = RoboSnailArenaBridge(width=64, height=64)
     dx, dy = bridge.solve_contact_sheaf(ego_id=0, dx=1.0, dy=0.0)
     assert (dx, dy) == (1.0, 0.0)
-    print(f"\n[PASS] Contact Sheaf Kinematics: (dx, dy)=({dx}, {dy})")
+
+    studio_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "studio", "robosnail_portable_studio.html")
+    with open(studio_path, "r", encoding="utf-8") as f:
+        html = f.read()
+    assert 'onclick="actuateEgo(0, 1)">▲ UP</button>' in html
+    assert 'onclick="actuateEgo(0, -1)">▼ DOWN</button>' in html
+    print(f"\n[PASS] Contact Sheaf Kinematics & WebGL2 Studio UP/DOWN Orientation: (dx, dy)=({dx}, {dy})")
