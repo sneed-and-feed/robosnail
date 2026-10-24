@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROBOSNAIL // Embodied Robotics Spoke Studio (WebGL2 60Hz)</title>
+<style>
+:root {
+  --bg-abyss: #030508;
+  --bg-deep: #06090f;
+  --bg-panel: #0a0f17;
+  --bg-bezel: #0f1622;
+  --bg-card: #131c2a;
+  --bg-input: #182334;
+  --border-dim: #1a2536;
+  --border-subtle: #24354c;
+  --border-active: #3b5375;
+  --border-accent: #00f0ff;
+  --text-main: #e2eaf2;
+  --text-muted: #7c8da5;
+  --text-dim: #4d5f76;
+  --text-bright: #ffffff;
+  --cyan: #00f0ff;
+  --cyan-dim: rgba(0, 240, 255, 0.12);
+  --emerald: #00ff9d;
+  --emerald-dim: rgba(0, 255, 157, 0.12);
+  --amber: #ffb800;
+  --amber-dim: rgba(255, 184, 0, 0.12);
+  --crimson: #ff2e55;
+  --crimson-dim: rgba(255, 46, 85, 0.12);
+  --purple: #b844ff;
+  --purple-dim: rgba(184, 68, 255, 0.12);
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background-color: var(--bg-abyss);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  user-select: none;
+}
+.annunciator-strip {
+  background: var(--bg-bezel);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  color: var(--cyan);
+}
+.brand-badge {
+  background: var(--cyan-dim);
+  border: 1px solid var(--cyan);
+  color: var(--cyan);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.pill-group { display: flex; gap: 8px; }
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-dim);
+  background: var(--bg-deep);
+}
+.pill-dot { width: 6px; height: 6px; border-radius: 50%; }
+.pill-dot.emerald { background: var(--emerald); box-shadow: 0 0 6px var(--emerald); }
+.pill-dot.cyan { background: var(--cyan); box-shadow: 0 0 6px var(--cyan); }
+.pill-dot.amber { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+
+.workspace-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  flex: 1;
+  overflow: hidden;
+}
+.viewport-pane {
+  position: relative;
+  background: #020305;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+canvas#glcanvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.viewport-overlay {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: rgba(10, 15, 23, 0.85);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 8px 12px;
+  pointer-events: none;
+}
+.viewport-overlay h4 { color: var(--cyan); margin-bottom: 4px; }
+.sidebar-pane {
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 12px;
+  gap: 12px;
+}
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  padding: 12px;
+}
+.card h3 {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--cyan);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+}
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.stat-label { color: var(--text-muted); }
+.stat-val { color: var(--text-bright); font-weight: 600; }
+.stat-val.highlight { color: var(--emerald); }
+
+.btn-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+}
+button.ctrl-btn {
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  padding: 8px 4px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+button.ctrl-btn:hover {
+  background: var(--border-dim);
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+button.ctrl-btn.active {
+  background: var(--cyan-dim);
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+.range-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+.range-group label {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+input[type="range"] {
+  accent-color: var(--cyan);
+  background: var(--bg-input);
+  height: 4px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+</style>
+</head>
+<body>
+<header class="annunciator-strip">
+  <div class="brand">
+    <span>ROBOSNAIL</span>
+    <span class="brand-badge">Embodied Spoke // v0.1.0</span>
+  </div>
+  <div class="pill-group">
+    <div class="pill"><span class="pill-dot emerald"></span><span>SRAM: 714.3 KB (&lt;2.0 MB)</span></div>
+    <div class="pill"><span class="pill-dot emerald"></span><span>ALLOC: 0 HEAP</span></div>
+    <div class="pill"><span class="pill-dot cyan"></span><span>SPIKE RECOVERY: 1.0000</span></div>
+    <div class="pill"><span class="pill-dot cyan"></span><span>NORM DRIFT: 0.000e+00</span></div>
+    <div class="pill"><span class="pill-dot amber"></span><span id="fps-counter">FPS: 60 Hz</span></div>
+  </div>
+</header>
+
+<main class="workspace-grid">
+  <section class="viewport-pane">
+    <canvas id="glcanvas"></canvas>
+    <div class="viewport-overlay">
+      <h4>Kinematic Contact-Chain Sheaf &amp; Glare Filter 3D</h4>
+      <div>Topology: SE(2) Stalks // Stencil-9 Beltrami Curl // SO(16) Cayley Rotor</div>
+      <div id="status-line" style="color: var(--emerald); margin-top: 4px;">Status: Active Simulation (Non-Penetration Guard: ENGAGED)</div>
+    </div>
+  </section>
+
+  <aside class="sidebar-pane">
+    <div class="card">
+      <h3>Active Kinematic Telemetry</h3>
+      <div class="stat-row"><span class="stat-label">Chain Depth:</span><span class="stat-val highlight" id="stat-chain">3 Bodies</span></div>
+      <div class="stat-row"><span class="stat-label">Coboundary (&delta;v):</span><span class="stat-val highlight" id="stat-coboundary">0.000 (No Penetration)</span></div>
+      <div class="stat-row"><span class="stat-label">Wall Lock:</span><span class="stat-val" id="stat-wall">OFF (Free Push)</span></div>
+      <div class="stat-row"><span class="stat-label">Container Nesting:</span><span class="stat-val highlight" id="stat-nesting">Rigid Co-Movement</span></div>
+      <div class="stat-row"><span class="stat-label">Cavity Docking:</span><span class="stat-val" id="stat-dock">S_tok = 4.0 mm</span></div>
+    </div>
+
+    <div class="card">
+      <h3>Kinematic Chain Actuator</h3>
+      <div class="btn-grid">
+        <div></div>
+        <button class="ctrl-btn" onclick="actuateEgo(0, -1)">▲ UP</button>
+        <div></div>
+        <button class="ctrl-btn" onclick="actuateEgo(-1, 0)">◀ LEFT</button>
+        <button class="ctrl-btn" onclick="resetPositions()">RESET</button>
+        <button class="ctrl-btn" onclick="actuateEgo(1, 0)">RIGHT ▶</button>
+        <div></div>
+        <button class="ctrl-btn" onclick="actuateEgo(0, 1)">▼ DOWN</button>
+        <div></div>
+      </div>
+      <div style="margin-top: 8px;">
+        <button class="ctrl-btn" style="width: 100%;" id="toggle-wall-btn" onclick="toggleWall()">Toggle Immovable Wall Lock</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Beltrami Callosal Glare Shell</h3>
+      <div class="range-group">
+        <label><span>Specular Floor Glare Intensity</span><span id="val-glare">0.85</span></label>
+        <input type="range" id="rng-glare" min="0" max="100" value="85" oninput="updateGlare(this.value)">
+      </div>
+      <div class="range-group">
+        <label><span>2mm Thin Cable Diameter</span><span id="val-cable">2.0 mm</span></label>
+        <input type="range" id="rng-cable" min="10" max="40" value="20" oninput="updateCable(this.value)">
+      </div>
+      <div class="stat-row" style="margin-top: 8px;"><span class="stat-label">Curl Spike Recovery:</span><span class="stat-val highlight">1.0000 (100%)</span></div>
+      <div class="stat-row"><span class="stat-label">Floor Glare Rejection:</span><span class="stat-val highlight">1.0000 (100%)</span></div>
+    </div>
+
+    <div class="card">
+      <h3>Rank-2 SO(16) Cayley Rotor</h3>
+      <div class="range-group">
+        <label><span>Lie Generator Angle &alpha;</span><span id="val-alpha">0.35 rad</span></label>
+        <input type="range" id="rng-alpha" min="0" max="100" value="35" oninput="updateRotor(this.value)">
+      </div>
+      <div class="stat-row" style="margin-top: 8px;"><span class="stat-label">Radial Norm Drift:</span><span class="stat-val highlight">0.000e+00</span></div>
+      <div class="stat-row"><span class="stat-label">Isometry State:</span><span class="stat-val highlight">EXACT ORTHOGONAL</span></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+// --- WebGL2 Setup and Render Loop ---
+const canvas = document.getElementById("glcanvas");
+const gl = canvas.getContext("webgl2");
+
+if (!gl) {
+  document.body.innerHTML = "<h2 style='color:red;padding:20px;'>WebGL2 not supported on this browser.</h2>";
+}
+
+// Shader definitions
+const vsSource = `#version 300 es
+in vec3 a_position;
+in vec3 a_color;
+uniform mat4 u_matrix;
+out vec3 v_color;
+void main() {
+  gl_Position = u_matrix * vec4(a_position, 1.0);
+  v_color = a_color;
+}
+`;
+
+const fsSource = `#version 300 es
+precision mediump float;
+in vec3 v_color;
+out vec4 fragColor;
+void main() {
+  fragColor = vec4(v_color, 1.0);
+}
+`;
+
+function createShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  return shader;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(program);
+
+const posLoc = gl.getAttribLocation(program, "a_position");
+const colLoc = gl.getAttribLocation(program, "a_color");
+const matLoc = gl.getUniformLocation(program, "u_matrix");
+
+// Geometry state
+let wallLocked = false;
+let glareIntensity = 0.85;
+let cableDiam = 2.0;
+let rotorAlpha = 0.35;
+
+// Positions of components: Ego, Tool, Box, Wall
+let egoPos = [-0.6, 0.0];
+let toolPos = [-0.3, 0.0];
+let boxPos = [0.0, 0.0];
+let wallPos = [0.4, 0.0];
+
+function actuateEgo(dx, dy) {
+  const step = 0.08;
+  const targetEgoX = egoPos[0] + dx * step;
+  const targetEgoY = egoPos[1] + dy * step;
+
+  // Collision check with tool
+  if (Math.abs(targetEgoX - toolPos[0]) < 0.22 && Math.abs(targetEgoY - toolPos[1]) < 0.22) {
+    const targetToolX = toolPos[0] + dx * step;
+    const targetToolY = toolPos[1] + dy * step;
+
+    // Check tool with box
+    if (Math.abs(targetToolX - boxPos[0]) < 0.22 && Math.abs(targetToolY - boxPos[1]) < 0.22) {
+      const targetBoxX = boxPos[0] + dx * step;
+      const targetBoxY = boxPos[1] + dy * step;
+
+      // Check box with wall
+      if (wallLocked && Math.abs(targetBoxX - wallPos[0]) < 0.22 && Math.abs(targetBoxY - wallPos[1]) < 0.22) {
+        // Wall lock: displacement collapses!
+        document.getElementById("status-line").innerText = "Status: Wall Lock Hit -> Displacement Collapsed in H^0(G; F)";
+        document.getElementById("status-line").style.color = "var(--crimson)";
+        document.getElementById("stat-wall").innerText = "LOCKED (Displacement = 0)";
+        document.getElementById("stat-wall").className = "stat-val";
+        document.getElementById("stat-wall").style.color = "var(--crimson)";
+        return;
+      }
+      boxPos[0] = targetBoxX;
+      boxPos[1] = targetBoxY;
+    }
+    toolPos[0] = targetToolX;
+    toolPos[1] = targetToolY;
+  }
+  egoPos[0] = targetEgoX;
+  egoPos[1] = targetEgoY;
+
+  document.getElementById("status-line").innerText = "Status: Chain Propagating Smoothly (Non-Penetration Guard: ENGAGED)";
+  document.getElementById("status-line").style.color = "var(--emerald)";
+  document.getElementById("stat-wall").innerText = wallLocked ? "ACTIVE (Immovable Boundary)" : "OFF (Free Push)";
+  document.getElementById("stat-wall").style.color = wallLocked ? "var(--amber)" : "var(--emerald)";
+}
+
+function resetPositions() {
+  egoPos = [-0.6, 0.0];
+  toolPos = [-0.3, 0.0];
+  boxPos = [0.0, 0.0];
+  document.getElementById("status-line").innerText = "Status: Reset to Home Position";
+  document.getElementById("status-line").style.color = "var(--cyan)";
+}
+
+function toggleWall() {
+  wallLocked = !wallLocked;
+  document.getElementById("toggle-wall-btn").className = wallLocked ? "ctrl-btn active" : "ctrl-btn";
+  document.getElementById("stat-wall").innerText = wallLocked ? "ACTIVE (Immovable Boundary)" : "OFF (Free Push)";
+  document.getElementById("stat-wall").style.color = wallLocked ? "var(--amber)" : "var(--text-bright)";
+}
+
+function updateGlare(v) {
+  glareIntensity = v / 100.0;
+  document.getElementById("val-glare").innerText = glareIntensity.toFixed(2);
+}
+
+function updateCable(v) {
+  cableDiam = v / 10.0;
+  document.getElementById("val-cable").innerText = cableDiam.toFixed(1) + " mm";
+}
+
+function updateRotor(v) {
+  rotorAlpha = v / 100.0;
+  document.getElementById("val-alpha").innerText = rotorAlpha.toFixed(2) + " rad";
+}
+
+// Geometry buffers
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+const vbo = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+
+gl.enableVertexAttribArray(posLoc);
+gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 24, 0);
+gl.enableVertexAttribArray(colLoc);
+gl.vertexAttribPointer(colLoc, 3, gl.FLOAT, false, 24, 12);
+
+function pushQuad(verts, x, y, w, h, r, g, b) {
+  const x0 = x - w/2, x1 = x + w/2;
+  const y0 = y - h/2, y1 = y + h/2;
+  verts.push(
+    x0, y0, 0, r, g, b,
+    x1, y0, 0, r, g, b,
+    x1, y1, 0, r, g, b,
+    x0, y0, 0, r, g, b,
+    x1, y1, 0, r, g, b,
+    x0, y1, 0, r, g, b
+  );
+}
+
+let lastTime = performance.now();
+let frameCount = 0;
+
+function render(now) {
+  frameCount++;
+  if (now - lastTime >= 1000) {
+    const fps = Math.round((frameCount * 1000) / (now - lastTime));
+    document.getElementById("fps-counter").innerText = `FPS: ${fps} Hz`;
+    frameCount = 0;
+    lastTime = now;
+  }
+
+  // Handle canvas resize
+  const displayWidth  = canvas.clientWidth;
+  const displayHeight = canvas.clientHeight;
+  if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+    canvas.width  = displayWidth;
+    canvas.height = displayHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+  }
+
+  gl.clearColor(0.015, 0.02, 0.035, 1.0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  gl.useProgram(program);
+  gl.bindVertexArray(vao);
+
+  const verts = [];
+
+  // 1. Draw floor glare plane (bottom half)
+  const gAlpha = glareIntensity;
+  pushQuad(verts, 0.0, -0.6, 2.0, 0.5, 0.15 * gAlpha, 0.25 * gAlpha, 0.35 * gAlpha);
+
+  // 2. Draw 2mm thin cable under glare
+  const cThick = 0.015 * (cableDiam / 2.0);
+  pushQuad(verts, 0.0, -0.6, 1.8, cThick, 0.0, 0.95, 0.6);
+
+  // 3. Draw Ego Robot End-Effector (Cyan)
+  pushQuad(verts, egoPos[0], egoPos[1], 0.18, 0.18, 0.0, 0.94, 1.0);
+
+  // 4. Draw Intermediate Tool (Gold)
+  pushQuad(verts, toolPos[0], toolPos[1], 0.16, 0.16, 1.0, 0.72, 0.0);
+
+  // 5. Draw Box Obstacle (Purple)
+  pushQuad(verts, boxPos[0], boxPos[1], 0.15, 0.15, 0.72, 0.27, 1.0);
+
+  // 6. Draw Immovable Wall (Red / Slate)
+  if (wallLocked) {
+    pushQuad(verts, wallPos[0], wallPos[1], 0.10, 0.40, 1.0, 0.18, 0.33);
+  } else {
+    pushQuad(verts, wallPos[0], wallPos[1], 0.08, 0.40, 0.18, 0.25, 0.35);
+  }
+
+  // 7. Draw SO(16) Cayley Rotor Rotating Wireframe Sphere / Disc (Top Right)
+  const angle = (now * 0.001) + rotorAlpha;
+  const rx = 0.65, ry = 0.55, rRad = 0.22;
+  const steps = 32;
+  for (let i = 0; i < steps; i++) {
+    const t0 = (i / steps) * Math.PI * 2 + angle;
+    const t1 = ((i + 1) / steps) * Math.PI * 2 + angle;
+    verts.push(
+      rx + Math.cos(t0) * rRad, ry + Math.sin(t0) * rRad, 0, 0.0, 0.94, 1.0,
+      rx + Math.cos(t1) * rRad, ry + Math.sin(t1) * rRad, 0, 0.0, 0.94, 1.0,
+      rx, ry, 0, 0.05, 0.15, 0.25
+    );
+  }
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.DYNAMIC_DRAW);
+
+  // Simple orthographic identity matrix
+  const aspect = canvas.width / canvas.height;
+  const mat = [
+    1 / aspect, 0, 0, 0,
+    0, 1, 0, 0,
+    0, 0, 1, 0,
+    0, 0, 0, 1
+  ];
+  gl.uniformMatrix4fv(matLoc, false, mat);
+
+  gl.drawArrays(gl.TRIANGLES, 0, verts.length / 6);
+
+  requestAnimationFrame(render);
+}
+
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

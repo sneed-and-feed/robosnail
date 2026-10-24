@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "robosnail"
+version = "0.1.0"
+description = "Embodied Robotics Spoke: Contact-Chain Sheaf, 2mm Cable Glare Filter, and so(16) Cayley Rotor TTT"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/sneed-and-feed/robosnail"
+Repository = "https://github.com/sneed-and-feed/robosnail"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["robosnail*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

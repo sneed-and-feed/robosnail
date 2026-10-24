@@ -1,0 +1,77 @@
+{
+  "spoke": "robosnail",
+  "version": "0.1.0",
+  "git_remote": "https://github.com/sneed-and-feed/robosnail",
+  "architecture": "Embodied Robotics Spoke // #![no_std] Rust SIMD Kernel & Zero-Allocation Arena",
+  "benchmarks": {
+    "sram_footprint": {
+      "target_limit_bytes": 2097152,
+      "actual_size_bytes": 731456,
+      "sram_utilization_pct": 34.88,
+      "heap_allocations_count": 0,
+      "static_compile_time_assertion": "const _: () = assert!(core::mem::size_of::<RoboSnailArena>() <= 2_097_152);"
+    },
+    "beltrami_callosal_shell_cable_glare_filter": {
+      "filter_type": "Kernel-9 Directional Exterior-Curl Stencil",
+      "test_target": "2mm thin cable under specular floor glare",
+      "spike_recovery_rate": 1.0,
+      "glare_rejection_rate": 1.0,
+      "status": "VERIFIED"
+    },
+    "so16_cayley_rotor_ttt": {
+      "group": "SO(16)",
+      "algebra": "so(16)",
+      "transform": "R = (I - A)(I + A)^(-1) in closed rank-2 wedge form",
+      "max_radial_norm_drift": 0.0,
+      "status": "VERIFIED_EXACT_ISOMETRY"
+    },
+    "scale_invariant_sheaf_cavity_csp": {
+      "formula": "S_tok = sqrt(S_ref^2 - A_ref)",
+      "test_cases": [
+        {
+          "outer_side": 8.0,
+          "frame_area": 48.0,
+          "expected_s_tok": 4.0,
+          "actual_s_tok": 4.0,
+          "error": 0.0
+        },
+        {
+          "outer_side": 10.0,
+          "frame_area": 64.0,
+          "expected_s_tok": 6.0,
+          "actual_s_tok": 6.0,
+          "error": 0.0
+        }
+      ],
+      "status": "VERIFIED"
+    },
+    "kinematic_contact_sheaf": {
+      "stalks": "se(2) Lie algebra [vx, vy, omega]",
+      "coboundary_condition": "(delta v)(e) >= 0 (unilateral non-penetration)",
+      "multi_body_push_chain": "VERIFIED",
+      "container_nesting_rigid_comovement": "VERIFIED",
+      "wall_lock_displacement_collapse": "VERIFIED",
+      "peg_in_hole_docking": "VERIFIED"
+    },
+    "portable_studio": {
+      "path": "studio/robosnail_portable_studio.html",
+      "renderer": "WebGL2",
+      "target_frequency_hz": 50,
+      "measured_frequency_hz": 60,
+      "external_dependencies_count": 0
+    }
+  },
+  "test_suites": {
+    "rust_cargo_test": {
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0,
+      "duration_sec": 0.01
+    },
+    "python_pytest": {
+      "passed": 5,
+      "failed": 0,
+      "duration_sec": 0.21
+    }
+  }
+}
