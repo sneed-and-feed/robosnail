@@ -1,5 +1,13 @@
+target/
 /target
-/__pycache__
-*.pyc
-.pytest_cache
-*.egg-info
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.agents/
+.DS_Store
