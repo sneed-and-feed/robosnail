@@ -1,6 +1,7 @@
 {
   "spoke": "robosnail",
   "version": "0.1.0",
+  "timestamp_utc": "2026-10-25T21:21:18Z",
   "git_remote": "https://github.com/sneed-and-feed/robosnail",
   "architecture": "Embodied Robotics Spoke // #![no_std] Rust SIMD Kernel & Zero-Allocation Arena",
   "benchmarks": {
@@ -71,7 +72,7 @@
     "python_pytest": {
       "passed": 5,
       "failed": 0,
-      "duration_sec": 0.21
+      "duration_sec": 0.01
     }
   }
 }
