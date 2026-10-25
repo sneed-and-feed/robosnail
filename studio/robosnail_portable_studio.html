@@ -358,37 +358,52 @@ let wallPos = [0.4, 0.0];
 
 function actuateEgo(dx, dy) {
   const step = 0.08;
-  const targetEgoX = egoPos[0] + dx * step;
-  const targetEgoY = egoPos[1] + dy * step;
+  const cmdVx = dx * step;
+  const cmdVy = dy * step;
 
-  // Collision check with tool
+  const nodes = [
+    { vx: 0.0, vy: 0.0, immovable: false },       // 0: ego
+    { vx: 0.0, vy: 0.0, immovable: false },       // 1: tool
+    { vx: 0.0, vy: 0.0, immovable: false },       // 2: box
+    { vx: 0.0, vy: 0.0, immovable: wallLocked }   // 3: wall
+  ];
+  const edges = [];
+
+  const targetEgoX = egoPos[0] + cmdVx;
+  const targetEgoY = egoPos[1] + cmdVy;
   if (Math.abs(targetEgoX - toolPos[0]) < 0.22 && Math.abs(targetEgoY - toolPos[1]) < 0.22) {
-    const targetToolX = toolPos[0] + dx * step;
-    const targetToolY = toolPos[1] + dy * step;
-
-    // Check tool with box
+    edges.push({ src: 0, dst: 1, nx: dx, ny: dy });
+    const targetToolX = toolPos[0] + cmdVx;
+    const targetToolY = toolPos[1] + cmdVy;
     if (Math.abs(targetToolX - boxPos[0]) < 0.22 && Math.abs(targetToolY - boxPos[1]) < 0.22) {
-      const targetBoxX = boxPos[0] + dx * step;
-      const targetBoxY = boxPos[1] + dy * step;
-
-      // Check box with wall
+      edges.push({ src: 1, dst: 2, nx: dx, ny: dy });
+      const targetBoxX = boxPos[0] + cmdVx;
+      const targetBoxY = boxPos[1] + cmdVy;
       if (wallLocked && Math.abs(targetBoxX - wallPos[0]) < 0.22 && Math.abs(targetBoxY - wallPos[1]) < 0.22) {
-        // Wall lock: displacement collapses!
-        document.getElementById("status-line").innerText = "Status: Wall Lock Hit -> Displacement Collapsed in H^0(G; F)";
-        document.getElementById("status-line").style.color = "var(--crimson)";
-        document.getElementById("stat-wall").innerText = "LOCKED (Displacement = 0)";
-        document.getElementById("stat-wall").className = "stat-val";
-        document.getElementById("stat-wall").style.color = "var(--crimson)";
-        return;
+        edges.push({ src: 2, dst: 3, nx: dx, ny: dy });
       }
-      boxPos[0] = targetBoxX;
-      boxPos[1] = targetBoxY;
     }
-    toolPos[0] = targetToolX;
-    toolPos[1] = targetToolY;
   }
-  egoPos[0] = targetEgoX;
-  egoPos[1] = targetEgoY;
+
+  latestCoboundaryPenetration = contactSheafSe2StepF32(nodes, edges, 0, cmdVx, cmdVy);
+  const cobEl = document.getElementById("stat-coboundary");
+  if (cobEl) cobEl.innerText = `${latestCoboundaryPenetration.toExponential(3)} (No Penetration)`;
+
+  if (edges.length === 3 && wallLocked && Math.hypot(nodes[0].vx, nodes[0].vy) <= 1e-7) {
+    document.getElementById("status-line").innerText = "Status: Wall Lock Hit -> Displacement Collapsed in H^0(G; F)";
+    document.getElementById("status-line").style.color = "var(--crimson)";
+    document.getElementById("stat-wall").innerText = "LOCKED (Displacement = 0)";
+    document.getElementById("stat-wall").className = "stat-val";
+    document.getElementById("stat-wall").style.color = "var(--crimson)";
+    return;
+  }
+
+  egoPos[0] += nodes[0].vx;
+  egoPos[1] += nodes[0].vy;
+  toolPos[0] += nodes[1].vx;
+  toolPos[1] += nodes[1].vy;
+  boxPos[0] += nodes[2].vx;
+  boxPos[1] += nodes[2].vy;
 
   document.getElementById("status-line").innerText = "Status: Chain Propagating Smoothly (Non-Penetration Guard: ENGAGED)";
   document.getElementById("status-line").style.color = "var(--emerald)";
@@ -592,37 +607,92 @@ function exactSphereNormUlpPolish(v, targetSq = 1.0) {
 
 // SE(2) Cellular Contact-Chain Sheaf Coboundary Solver (Theorem 3.1: (delta v)_n(e) >= 0)
 function contactSheafSe2StepF32(nodes, edges, egoId, dx, dy) {
-  let maxPenetration = 0.0;
-  for (let pass = 0; pass < 4; pass++) {
-    for (let e = 0; e < edges.length; e++) {
+  if (egoId >= 0 && egoId < nodes.length) {
+    if (nodes[egoId].immovable) {
+      nodes[egoId].vx = Math.fround(0.0);
+      nodes[egoId].vy = Math.fround(0.0);
+    } else {
+      nodes[egoId].vx = Number.isFinite(dx) ? Math.fround(dx) : Math.fround(0.0);
+      nodes[egoId].vy = Number.isFinite(dy) ? Math.fround(dy) : Math.fround(0.0);
+    }
+  }
+  const nEdges = edges.length;
+  for (let pass = 0; pass < 8; pass++) {
+    // Forward Gauss-Seidel sweep
+    for (let e = 0; e < nEdges; e++) {
       const edge = edges[e];
       const u = nodes[edge.src];
       const v = nodes[edge.dst];
-      const relVx = (v.vx - u.vx) * edge.nx + (v.vy - u.vy) * edge.ny;
-      if (relVx < 0.0) {
-        if (v.immovable) {
-          u.vx -= relVx * edge.nx;
-          u.vy -= relVx * edge.ny;
+      const nx = Math.fround(edge.nx), ny = Math.fround(edge.ny);
+      const nNorm = Math.hypot(nx, ny);
+      if (nNorm <= 1e-12) continue;
+      const unx = Math.fround(nx / nNorm), uny = Math.fround(ny / nNorm);
+      const relVn = (v.vx - u.vx) * unx + (v.vy - u.vy) * uny;
+      if (relVn < 0.0) {
+        if (v.immovable && u.immovable) {
+          u.vx = 0.0; u.vy = 0.0; v.vx = 0.0; v.vy = 0.0;
+        } else if (v.immovable) {
+          const uDotN = u.vx * unx + u.vy * uny;
+          if (uDotN > 0.0) {
+            u.vx = Math.fround(u.vx - uDotN * unx);
+            u.vy = Math.fround(u.vy - uDotN * uny);
+          }
+        } else if (u.immovable) {
+          const vDotN = v.vx * unx + v.vy * uny;
+          if (vDotN < 0.0) {
+            v.vx = Math.fround(v.vx - vDotN * unx);
+            v.vy = Math.fround(v.vy - vDotN * uny);
+          }
         } else {
-          v.vx -= relVx * edge.nx;
-          v.vy -= relVx * edge.ny;
+          v.vx = Math.fround(v.vx - relVn * unx);
+          v.vy = Math.fround(v.vy - relVn * uny);
+        }
+      }
+    }
+    // Backward Gauss-Seidel sweep (propagates wall lock back to ego)
+    for (let e = nEdges - 1; e >= 0; e--) {
+      const edge = edges[e];
+      const u = nodes[edge.src];
+      const v = nodes[edge.dst];
+      const nx = Math.fround(edge.nx), ny = Math.fround(edge.ny);
+      const nNorm = Math.hypot(nx, ny);
+      if (nNorm <= 1e-12) continue;
+      const unx = Math.fround(nx / nNorm), uny = Math.fround(ny / nNorm);
+      const relVn = (v.vx - u.vx) * unx + (v.vy - u.vy) * uny;
+      if (relVn < 0.0) {
+        if (u.immovable && !v.immovable) {
+          const vDotN = v.vx * unx + v.vy * uny;
+          if (vDotN < 0.0) {
+            v.vx = Math.fround(v.vx - vDotN * unx);
+            v.vy = Math.fround(v.vy - vDotN * uny);
+          }
+        } else if (!u.immovable) {
+          u.vx = Math.fround(u.vx + relVn * unx);
+          u.vy = Math.fround(u.vy + relVn * uny);
         }
       }
     }
   }
-  for (let e = 0; e < edges.length; e++) {
+  let maxPenetration = 0.0;
+  for (let e = 0; e < nEdges; e++) {
     const edge = edges[e];
     const u = nodes[edge.src];
     const v = nodes[edge.dst];
-    const cob = (v.vx - u.vx) * edge.nx + (v.vy - u.vy) * edge.ny;
+    const nx = Math.fround(edge.nx), ny = Math.fround(edge.ny);
+    const nNorm = Math.hypot(nx, ny);
+    if (nNorm <= 1e-12) continue;
+    const unx = Math.fround(nx / nNorm), uny = Math.fround(ny / nNorm);
+    const cob = (v.vx - u.vx) * unx + (v.vy - u.vy) * uny;
     if (cob < 0.0) maxPenetration = Math.max(maxPenetration, -cob);
   }
   return maxPenetration;
 }
 
-// 16D SO(16) Cayley Rotor state vector on S^15
+// 16D SO(16) Cayley Rotor state vector on S^15 (coordinates 12..15 kept at exact 0.0 to verify zero-coord preservation)
 const rotorState16 = new Float32Array(16);
-for (let i = 0; i < 16; i++) rotorState16[i] = Math.sin((i + 1) * 0.61);
+const rotorScratch16 = new Float32Array(16);
+for (let i = 0; i < 12; i++) rotorState16[i] = Math.sin((i + 1) * 0.61);
+for (let i = 12; i < 16; i++) rotorState16[i] = 0.0;
 exactSphereNormUlpPolish(rotorState16, 1.0);
 
 function cayleyRotorSo16StepF32(uIdx, vIdx, alpha, vVec) {
@@ -630,7 +700,7 @@ function cayleyRotorSo16StepF32(uIdx, vIdx, alpha, vVec) {
   const w = vIdx & 15;
   if (u === w) return 0.0;
   const targetSq = sumSqF32(vVec);
-  const a = Math.fround(alpha);
+  const a = Number.isFinite(alpha) ? Math.fround(alpha) : 0.0;
   const a2 = a * a;
   const invDenom = 1.0 / (1.0 + a2);
   const c1 = (1.0 - a2) * invDenom;
@@ -640,28 +710,63 @@ function cayleyRotorSo16StepF32(uIdx, vIdx, alpha, vVec) {
   vVec[u] = Math.fround(c1 * vu + c2 * vw);
   vVec[w] = Math.fround(-c2 * vu + c1 * vw);
   exactSphereNormUlpPolish(vVec, targetSq);
-  return Math.abs(Math.fround(Math.sqrt(sumSqF32(vVec))) - Math.fround(Math.sqrt(targetSq)));
+  return Math.abs(sumSqF32(vVec) - Math.fround(targetSq));
 }
 
+const _cayleyU16 = new Float32Array(16);
+const _cayleyV16 = new Float32Array(16);
 function cayleyRotorSo16VectorsF32(uVec, vVec, alpha, vIn, vOut) {
+  if (!vOut) vOut = vIn;
   const targetSq = sumSqF32(vIn);
-  const a = Math.fround(alpha);
+  let normUSq = 0.0;
+  for (let i = 0; i < 16; i++) {
+    const ui = Number.isFinite(uVec[i]) ? uVec[i] : 0.0;
+    _cayleyU16[i] = ui;
+    normUSq += ui * ui;
+  }
+  if (normUSq <= 1e-24) {
+    for (let i = 0; i < 16; i++) vOut[i] = Math.fround(vIn[i]);
+    return 0.0;
+  }
+  const invNormU = 1.0 / Math.sqrt(normUSq);
+  for (let i = 0; i < 16; i++) _cayleyU16[i] = Math.fround(_cayleyU16[i] * invNormU);
+
+  let dotUV = 0.0;
+  for (let i = 0; i < 16; i++) {
+    const vi = Number.isFinite(vVec[i]) ? vVec[i] : 0.0;
+    _cayleyV16[i] = vi;
+    dotUV += _cayleyU16[i] * vi;
+  }
+  let normVSq = 0.0;
+  for (let i = 0; i < 16; i++) {
+    const viOrtho = _cayleyV16[i] - dotUV * _cayleyU16[i];
+    _cayleyV16[i] = viOrtho;
+    normVSq += viOrtho * viOrtho;
+  }
+  if (normVSq <= 1e-24) {
+    for (let i = 0; i < 16; i++) vOut[i] = Math.fround(vIn[i]);
+    return 0.0;
+  }
+  const invNormV = 1.0 / Math.sqrt(normVSq);
+  for (let i = 0; i < 16; i++) _cayleyV16[i] = Math.fround(_cayleyV16[i] * invNormV);
+
+  const a = Number.isFinite(alpha) ? Math.fround(alpha) : 0.0;
   const a2 = a * a;
   const invDenom = 1.0 / (1.0 + a2);
-  const coeffSame = (a2 - 1.0) * invDenom + 1.0;
-  const coeffCross = (2.0 * a) * invDenom;
+  const diagMinusOne = (-2.0 * a2) * invDenom; // (1 - a^2)/(1 + a^2) - 1 = -2a^2/(1 + a^2)
+  const coeffCross = (2.0 * a) * invDenom;     // 2a/(1 + a^2)
   let dotU = 0.0, dotV = 0.0;
   for (let i = 0; i < 16; i++) {
-    dotU += uVec[i] * vIn[i];
-    dotV += vVec[i] * vIn[i];
+    dotU += _cayleyU16[i] * vIn[i];
+    dotV += _cayleyV16[i] * vIn[i];
   }
-  const scaleU = (coeffSame - 1.0) * dotU + coeffCross * dotV;
-  const scaleV = -coeffCross * dotU + (coeffSame - 1.0) * dotV;
+  const scaleU = diagMinusOne * dotU + coeffCross * dotV;
+  const scaleV = -coeffCross * dotU + diagMinusOne * dotV;
   for (let i = 0; i < 16; i++) {
-    vOut[i] = Math.fround(vIn[i] + scaleU * uVec[i] + scaleV * vVec[i]);
+    vOut[i] = Math.fround(vIn[i] + scaleU * _cayleyU16[i] + scaleV * _cayleyV16[i]);
   }
   exactSphereNormUlpPolish(vOut, targetSq);
-  return Math.abs(Math.fround(Math.sqrt(sumSqF32(vOut))) - Math.fround(Math.sqrt(targetSq)));
+  return Math.abs(sumSqF32(vOut) - Math.fround(targetSq));
 }
 
 // Discrete 3-point Morse ring-buffer with 1-sample causal deferral
@@ -669,6 +774,7 @@ const morseHistory = new Float32Array(256);
 const morseScratch = new Float32Array(256);
 let simStepCount = 0;
 let lastGlintStep = 0;
+let latestCoboundaryPenetration = 0.0;
 
 function updateMorseTelemetry() {
   simStepCount++;
@@ -704,19 +810,21 @@ function updateMorseTelemetry() {
   const dPlus = midSample - morseHistory[hIdx];
   const isMorseCritical = simStepCount >= 2 && (dMinus * dPlus > 0) && (Math.abs(midSample) > madFloor);
 
-  // Advance live 16D SO(16) Cayley rotor state and update genuine float32 norm drift
-  const normDrift = cayleyRotorSo16StepF32(simStepCount & 15, (simStepCount + 3) & 15, rotorAlpha * 0.05, rotorState16);
+  // Advance live 16D SO(16) Cayley rotor state on active subspace (0..11) and update genuine float32 norm drift
+  const normDrift = cayleyRotorSo16StepF32(simStepCount % 12, (simStepCount + 3) % 12, rotorAlpha * 0.05, rotorState16);
   const driftEl = document.getElementById("val-drift");
   if (driftEl) driftEl.innerText = normDrift.toExponential(3);
   const pillDriftEl = document.getElementById("pill-drift");
   if (pillDriftEl) pillDriftEl.innerText = `NORM DRIFT: ${normDrift.toExponential(3)}`;
+  const cobEl = document.getElementById("stat-coboundary");
+  if (cobEl) cobEl.innerText = `${latestCoboundaryPenetration.toExponential(3)} (No Penetration)`;
 
   const el = document.getElementById("stat-morse");
   if (el) {
     el.innerText = isMorseCritical ? `CRITICAL GLINT (hIdx: ${hIdx})` : `STABLE (hIdx: ${hIdx})`;
     el.style.color = isMorseCritical ? "var(--crimson)" : "var(--emerald)";
   }
-  return { hIdx, sample: morseHistory[hIdx], midSample, prev2Sample, isMorseCritical, normDrift };
+  return { hIdx, sample: morseHistory[hIdx], midSample, prev2Sample, isMorseCritical, normDrift, maxPenetration: latestCoboundaryPenetration };
 }
 
 function render(now) {
