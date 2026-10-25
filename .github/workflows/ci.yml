@@ -1,0 +1,115 @@
+name: CI Matrix
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gfm-math-audit:
+    name: GFM KaTeX Math Compliance (21 Invariant Rules)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run GFM/KaTeX Math Linter
+        run: |
+          python scripts/audit_gfm_math.py README.md docs/ARCHITECTURE.md
+
+  rust-simd-tests:
+    name: Rust #![no_std] SIMD Arena & C-ABI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,wasm32-unknown-unknown
+          components: clippy
+
+      - name: Run Clippy Across Quad-SIMD & no_std Targets
+        run: |
+          cargo clippy --manifest-path rust/robosnail_rs/Cargo.toml --release --all-targets -- -D warnings
+          cargo clippy --manifest-path rust/robosnail_rs/Cargo.toml --no-default-features --release --lib -- -D warnings
+          cargo clippy --manifest-path rust/robosnail_rs/Cargo.toml --target aarch64-unknown-linux-gnu --release --lib -- -D warnings
+          cargo clippy --manifest-path rust/robosnail_rs/Cargo.toml --target wasm32-unknown-unknown --release --lib -- -D warnings
+          RUSTFLAGS="-C target-feature=+simd128" cargo clippy --manifest-path rust/robosnail_rs/Cargo.toml --target wasm32-unknown-unknown --release --lib -- -D warnings
+
+      - name: Run Cargo Tests (Release Mode)
+        run: |
+          cargo test --manifest-path rust/robosnail_rs/Cargo.toml --release --verbose
+
+      - name: Build WASM32 Target (Scalar & SIMD128)
+        run: |
+          cargo build --manifest-path rust/robosnail_rs/Cargo.toml --target wasm32-unknown-unknown --release
+          RUSTFLAGS="-C target-feature=+simd128" cargo build --manifest-path rust/robosnail_rs/Cargo.toml --target wasm32-unknown-unknown --release
+
+  python-parity-and-tests:
+    name: Python Oracle & C-ABI ctypes Parity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Compile Native Shared Library
+        run: |
+          cargo build --manifest-path rust/robosnail_rs/Cargo.toml --release
+
+      - name: Install Python Test Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest numpy scipy
+
+      - name: Verify Native C-ABI Bridge & Run Evaluation Suite
+        run: |
+          python -c "from robosnail.arena import RoboSnailArenaBridge; b = RoboSnailArenaBridge(); assert b.is_native, 'Native Rust library not loaded'"
+          python scripts/evaluate_robosnail.py
+
+      - name: Run Pytest Test Suite
+        run: |
+          pytest tests/test_robosnail.py -v
+
+  bcm2712-cache-verification:
+    name: Broadcom BCM2712 Cache Simulation (<0.05% LLd Miss)
+    runs-on: ubuntu-latest
+    needs: [rust-simd-tests]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Shared Library
+        run: |
+          cargo build --manifest-path rust/robosnail_rs/Cargo.toml --release
+
+      - name: Run BCM2712 Cachegrind & Symbol Audit
+        run: |
+          python scripts/verify_bcm2712_arena.py
