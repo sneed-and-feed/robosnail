@@ -7,8 +7,11 @@ description = "Allocation-free #![no_std] Rust arena kernel for embodied robotic
 license = "CC0-1.0"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib", "rlib", "staticlib"]
+doctest = false
 
 [features]
-default = ["std"]
+default = []
 std = []
+
+

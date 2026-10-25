@@ -266,7 +266,9 @@ input[type="range"] {
       </div>
       <div class="stat-row" style="margin-top: 8px;"><span class="stat-label">Curl Spike Recovery:</span><span class="stat-val highlight">1.0000 (100%)</span></div>
       <div class="stat-row"><span class="stat-label">Floor Glare Rejection:</span><span class="stat-val highlight">1.0000 (100%)</span></div>
+      <div class="stat-row"><span class="stat-label">Morse Ring Buffer:</span><span class="stat-val highlight" id="stat-morse">Causal Deferral (256-sample)</span></div>
     </div>
+
 
     <div class="card">
       <h3>Rank-2 SO(16) Cayley Rotor</h3>
@@ -453,14 +455,52 @@ function pushQuad(verts, x, y, w, h, r, g, b) {
 let lastTime = performance.now();
 let frameCount = 0;
 
+// Discrete 3-point Morse ring-buffer with 1-sample causal deferral
+const morseHistory = new Float32Array(256);
+let simStepCount = 0;
+let lastGlintStep = 0;
+
+function updateMorseTelemetry() {
+  simStepCount++;
+  const hIdx = simStepCount % 256;
+  let sample = Math.sin(simStepCount * 0.08) * 0.8 + Math.cos(simStepCount * 0.02) * 0.3;
+
+  if (simStepCount - lastGlintStep > 35 && Math.random() < 0.25) {
+    sample += (Math.random() > 0.5 ? 4.5 : -4.5);
+    lastGlintStep = simStepCount;
+  }
+  morseHistory[hIdx] = sample;
+
+  let sumAbs = 0;
+  for (let i = 0; i < 256; i++) sumAbs += Math.abs(morseHistory[i]);
+  const meanAbs = sumAbs / 256;
+  const madFloor = Math.max(0.2, meanAbs * 1.4826);
+
+  // 3-point discrete Morse innovation with 1-sample causal deferral at (t - 1): Delta_- * Delta_+ > 0
+  const midSample = morseHistory[(hIdx + 255) % 256];
+  const prev2Sample = morseHistory[(hIdx + 254) % 256];
+  const dMinus = midSample - prev2Sample;
+  const dPlus = midSample - sample;
+  const isMorseCritical = simStepCount >= 2 && (dMinus * dPlus > 0) && (Math.abs(midSample) > 3.0 * madFloor);
+
+  const el = document.getElementById("stat-morse");
+  if (el) {
+    el.innerText = isMorseCritical ? `CRITICAL GLINT (hIdx: ${hIdx})` : `STABLE (hIdx: ${hIdx})`;
+    el.style.color = isMorseCritical ? "var(--crimson)" : "var(--emerald)";
+  }
+  return { hIdx, sample, midSample, prev2Sample, isMorseCritical };
+}
+
 function render(now) {
   frameCount++;
+  updateMorseTelemetry();
   if (now - lastTime >= 1000) {
     const fps = Math.round((frameCount * 1000) / (now - lastTime));
     document.getElementById("fps-counter").innerText = `FPS: ${fps} Hz`;
     frameCount = 0;
     lastTime = now;
   }
+
 
   // Handle canvas resize
   const displayWidth  = canvas.clientWidth;

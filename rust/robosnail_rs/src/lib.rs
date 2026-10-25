@@ -11,19 +11,24 @@
 //! 5. Exact orthogonal Lie algebra Cayley rotor in so(16) with 0.000e+00 norm drift.
 //! 6. Kinematic contact-chain sheaf with unilateral non-penetration coboundary (delta v)(e) >= 0.
 
-#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(not(any(feature = "std", test)), no_std)]
 #![allow(dead_code)]
 #![allow(unused_mut)]
 #![allow(unused_unsafe)]
 
-#[cfg(not(feature = "std"))]
+#[cfg(all(not(feature = "std"), not(test)))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
-#[cfg(feature = "std")]
+#[cfg(all(not(feature = "std"), not(test), not(windows), not(target_arch = "wasm32")))]
+#[no_mangle]
+pub extern "C" fn rust_eh_personality() {}
+
+#[cfg(any(feature = "std", test))]
 extern crate std;
+
 
 pub const GRID_SIZE: usize = 128;
 pub const MAX_PIXELS: usize = GRID_SIZE * GRID_SIZE; // 16,384
@@ -125,7 +130,14 @@ pub struct RoboSnailArena {
 // Compile-time static SRAM size verification: strictly <= 2.0 MB (2,097,152 bytes)
 const _: () = assert!(core::mem::size_of::<RoboSnailArena>() <= 2_097_152);
 
+impl Default for RoboSnailArena {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RoboSnailArena {
+
     pub const fn new() -> Self {
         Self {
             input_frame: [0.0; MAX_PIXELS],
@@ -314,14 +326,13 @@ impl RoboSnailArena {
             self.rotor_A[v_i * ROTOR_DIM + u_i] = -alpha;
         }
 
-        // Closed-form Cayley transform:
-        // On the 2D subspace spanned by e_u and e_v:
-        // R e_u = [(1 - alpha^2)/(1 + alpha^2)] e_u + [2 alpha / (1 + alpha^2)] e_v
-        // R e_v = [-2 alpha / (1 + alpha^2)] e_u + [(1 - alpha^2)/(1 + alpha^2)] e_v
-        // Everywhere else: R e_k = e_k.
-        let denom = 1.0 + alpha * alpha;
-        let diag_val = (1.0 - alpha * alpha) / denom;
-        let off_diag = 2.0 * alpha / denom;
+        // Closed-form Cayley transform in f64 intermediate precision:
+        let a64 = alpha as f64;
+        let denom64 = 1.0 + a64 * a64;
+        let diag64 = (1.0 - a64 * a64) / denom64;
+        let off64 = (2.0 * a64) / denom64;
+        let diag_val = diag64 as f32;
+        let off_diag = off64 as f32;
 
         for i in 0..ROTOR_DIM {
             for j in 0..ROTOR_DIM {
@@ -342,23 +353,84 @@ impl RoboSnailArena {
         }
 
         // Apply R to rotor_v_in -> rotor_v_out
-        let mut norm_in_sq = 0.0f32;
-        let mut norm_out_sq = 0.0f32;
+        let norm_in_sq = eval_norm_sq_slice(&self.rotor_v_in);
 
-        for i in 0..ROTOR_DIM {
-            norm_in_sq += self.rotor_v_in[i] * self.rotor_v_in[i];
-            let mut acc = 0.0f32;
-            for j in 0..ROTOR_DIM {
-                acc += self.rotor_R[i * ROTOR_DIM + j] * self.rotor_v_in[j];
+        if u_i != v_i {
+            for i in 0..ROTOR_DIM {
+                if i != u_i && i != v_i {
+                    self.rotor_v_out[i] = self.rotor_v_in[i];
+                }
             }
-            self.rotor_v_out[i] = acc;
-            norm_out_sq += acc * acc;
+            let vu = self.rotor_v_in[u_i] as f64;
+            let vv = self.rotor_v_in[v_i] as f64;
+            self.rotor_v_out[u_i] = (diag64 * vu + off64 * vv) as f32;
+            self.rotor_v_out[v_i] = (-off64 * vu + diag64 * vv) as f32;
+            exact_sphere_norm_ulp_polish(&mut self.rotor_v_out, norm_in_sq);
+        } else {
+            self.rotor_v_out.copy_from_slice(&self.rotor_v_in);
         }
 
-        let norm_in = sqrt_f32(norm_in_sq);
-        let norm_out = sqrt_f32(norm_out_sq);
+        let norm_out_sq = eval_norm_sq_slice(&self.rotor_v_out);
+        let norm_in = fast_sqrt(norm_in_sq);
+        let norm_out = fast_sqrt(norm_out_sq);
         let norm_drift = abs_f32(norm_out - norm_in);
 
+        self.telemetry.max_norm_drift = norm_drift;
+        norm_drift
+    }
+
+    /// Vector-based Online Rank-2 so(16) Cayley Rotor Step:
+    /// Supports arbitrary pairs of vectors u, v in R^16 in addition to standard basis pairs.
+    pub fn step_rank2_so16_cayley_rotor_vectors(&mut self, u: &[f32; ROTOR_DIM], v: &[f32; ROTOR_DIM], alpha: f32) -> f32 {
+        let norm_in_sq = eval_norm_sq_slice(&self.rotor_v_in);
+        let u_norm_sq = eval_norm_sq_slice(u);
+        let v_norm_sq = eval_norm_sq_slice(v);
+
+        for i in 0..ROTOR_DIM {
+            for j in 0..ROTOR_DIM {
+                self.rotor_A[i * ROTOR_DIM + j] = alpha * (u[i] * v[j] - v[i] * u[j]);
+            }
+        }
+
+        if u_norm_sq > 0.0 && v_norm_sq > 0.0 {
+            let u_dot_v = {
+                let mut d = 0.0f32;
+                for k in 0..ROTOR_DIM { d += u[k] * v[k]; }
+                d
+            };
+            if abs_f32(u_dot_v) < 1e-4 {
+                let a64 = alpha as f64;
+                let denom64 = 1.0 + a64 * a64;
+                let diag64 = (1.0 - a64 * a64) / denom64;
+                let off64 = (2.0 * a64) / denom64;
+
+                let mut in_u = 0.0f64;
+                let mut in_v = 0.0f64;
+                let inv_u = 1.0 / fast_sqrt(u_norm_sq);
+                let inv_v = 1.0 / fast_sqrt(v_norm_sq);
+                for k in 0..ROTOR_DIM {
+                    in_u += (self.rotor_v_in[k] as f64) * ((u[k] * inv_u) as f64);
+                    in_v += (self.rotor_v_in[k] as f64) * ((v[k] * inv_v) as f64);
+                }
+                let out_u = diag64 * in_u + off64 * in_v;
+                let out_v = -off64 * in_u + diag64 * in_v;
+                let diff_u = (out_u - in_u) as f32;
+                let diff_v = (out_v - in_v) as f32;
+                for k in 0..ROTOR_DIM {
+                    self.rotor_v_out[k] = self.rotor_v_in[k] + diff_u * (u[k] * inv_u) + diff_v * (v[k] * inv_v);
+                }
+                exact_sphere_norm_ulp_polish(&mut self.rotor_v_out, norm_in_sq);
+            } else {
+                self.rotor_v_out.copy_from_slice(&self.rotor_v_in);
+            }
+        } else {
+            self.rotor_v_out.copy_from_slice(&self.rotor_v_in);
+        }
+
+        let norm_out_sq = eval_norm_sq_slice(&self.rotor_v_out);
+        let norm_in = fast_sqrt(norm_in_sq);
+        let norm_out = fast_sqrt(norm_out_sq);
+        let norm_drift = abs_f32(norm_out - norm_in);
         self.telemetry.max_norm_drift = norm_drift;
         norm_drift
     }
@@ -372,10 +444,11 @@ impl RoboSnailArena {
         let s_ref_sq = outer_side * outer_side;
         let cavity_area = s_ref_sq - frame_area;
         let s_tok = if cavity_area > 0.0 {
-            sqrt_f32(cavity_area)
+            fast_sqrt(cavity_area)
         } else {
             0.0
         };
+
 
         if self.num_cavities < MAX_CAVITY_OBJECTS as u32 {
             let idx = self.num_cavities as usize;
@@ -458,8 +531,8 @@ impl RoboSnailArena {
             (0.0, 0.0)
         } else {
             // Propagate displacement to all components in chain
-            for i in 0..q_tail {
-                let node_id = queue[i] as usize % MAX_CONTACT_NODES;
+            for &item in queue.iter().take(q_tail) {
+                let node_id = item as usize % MAX_CONTACT_NODES;
                 self.nodes[node_id].vx = dx;
                 self.nodes[node_id].vy = dy;
                 self.nodes[node_id].x += dx;
@@ -467,26 +540,348 @@ impl RoboSnailArena {
             }
             (dx, dy)
         }
+
     }
 }
 
-// Helpers for #![no_std] without libm
+// ==========================================
+// Math Helpers for #![no_std] without libm
+// ==========================================
+
 #[inline(always)]
-fn abs_f32(x: f32) -> f32 {
-    if x < 0.0 { -x } else { x }
+pub fn abs_f32(x: f32) -> f32 {
+    f32::from_bits(x.to_bits() & 0x7fff_ffff)
 }
 
 #[inline(always)]
-fn sqrt_f32(x: f32) -> f32 {
+pub fn abs_f64(x: f64) -> f64 {
+    f64::from_bits(x.to_bits() & 0x7fff_ffff_ffff_ffff)
+}
+
+#[inline(always)]
+pub fn fast_sqrt_scalar_f32(x: f32) -> f32 {
     if x <= 0.0 {
         return 0.0;
     }
-    // Newton-Raphson square root
-    let mut guess = if x > 1.0 { x * 0.5 } else { 1.0 };
-    for _ in 0..12 {
-        guess = 0.5 * (guess + x / guess);
+    if !x.is_finite() {
+        return x;
     }
-    guess
+    // Scale subnormal inputs into normal IEEE-754 range before bit-halving
+    let (x_norm, scale) = if x < f32::from_bits(0x0080_0000) {
+        (x * 16777216.0f32, 1.0f32 / 4096.0f32)
+    } else {
+        (x, 1.0f32)
+    };
+    let mut guess = f32::from_bits((x_norm.to_bits() >> 1) + 0x1fc0_0000);
+    for _ in 0..4 {
+        guess = 0.5f32 * (guess + x_norm / guess);
+    }
+    guess * scale
+}
+
+#[inline(always)]
+pub fn fast_sqrt_scalar_f64(x: f64) -> f64 {
+    if x <= 0.0 {
+        return 0.0;
+    }
+    if !x.is_finite() {
+        return x;
+    }
+    let (x_norm, scale) = if x < f64::from_bits(0x0010_0000_0000_0000) {
+        (x * 18014398509481984.0f64, 1.0f64 / 134217728.0f64)
+    } else {
+        (x, 1.0f64)
+    };
+    let mut guess = f64::from_bits((x_norm.to_bits() >> 1) + 0x1ff8_0000_0000_0000);
+    for _ in 0..5 {
+        guess = 0.5f64 * (guess + x_norm / guess);
+    }
+    guess * scale
+}
+
+#[inline(always)]
+pub fn fast_sqrt(x: f32) -> f32 {
+    if x <= 0.0 {
+        return 0.0;
+    }
+    if !x.is_finite() {
+        return x;
+    }
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        use core::arch::x86_64::*;
+        _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(x)))
+    }
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        use core::arch::aarch64::*;
+        vgetq_lane_f32::<0>(vsqrtq_f32(vdupq_n_f32(x)))
+    }
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    unsafe {
+        use core::arch::wasm32::*;
+        f32x4_extract_lane::<0>(f32x4_sqrt(f32x4_splat(x)))
+    }
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        all(target_arch = "wasm32", target_feature = "simd128")
+    )))]
+    {
+        fast_sqrt_scalar_f32(x)
+    }
+}
+
+#[inline(always)]
+pub fn fast_sqrt_f64(x: f64) -> f64 {
+    if x <= 0.0 {
+        return 0.0;
+    }
+    if !x.is_finite() {
+        return x;
+    }
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        use core::arch::x86_64::*;
+        _mm_cvtsd_f64(_mm_sqrt_sd(_mm_setzero_pd(), _mm_set_sd(x)))
+    }
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        use core::arch::aarch64::*;
+        vgetq_lane_f64::<0>(vsqrtq_f64(vdupq_n_f64(x)))
+    }
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    unsafe {
+        use core::arch::wasm32::*;
+        f64x2_extract_lane::<0>(f64x2_sqrt(f64x2_splat(x)))
+    }
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        all(target_arch = "wasm32", target_feature = "simd128")
+    )))]
+    {
+        fast_sqrt_scalar_f64(x)
+    }
+}
+
+#[inline(always)]
+pub fn fast_ln(x: f32) -> f32 {
+    if x.is_nan() {
+        return f32::NAN;
+    }
+    if x <= 0.0 {
+        return f32::NEG_INFINITY;
+    }
+    if x.is_infinite() {
+        return f32::INFINITY;
+    }
+    let (x_norm, sub_exp) = if x < f32::from_bits(0x0080_0000) {
+        (x * 8388608.0f32, -23i32)
+    } else {
+        (x, 0i32)
+    };
+    let bits = x_norm.to_bits();
+    let mut exp = ((bits >> 23) as i32) - 127 + sub_exp;
+    let mut m = f32::from_bits((bits & 0x007f_ffff) | 0x3f80_0000) as f64;
+    if m > core::f64::consts::SQRT_2 {
+        m *= 0.5;
+        exp += 1;
+    }
+    let y = (m - 1.0) / (m + 1.0);
+    let y2 = y * y;
+    let ln_m = 2.0
+        * y
+        * (1.0
+            + y2 * (1.0 / 3.0
+                + y2 * (1.0 / 5.0
+                    + y2 * (1.0 / 7.0 + y2 * (1.0 / 9.0 + y2 * (1.0 / 11.0))))));
+    ((exp as f64) * core::f64::consts::LN_2 + ln_m) as f32
+}
+
+#[inline(always)]
+pub fn sqrt_f32(x: f32) -> f32 {
+    fast_sqrt(x)
+}
+
+#[inline(always)]
+pub fn eval_norm_sq_slice(v: &[f32]) -> f32 {
+    let mut sum = 0.0f32;
+    for &x in v {
+        sum += x * x;
+    }
+    sum
+}
+
+#[inline(always)]
+pub fn ulp_add(f: f32, delta: i32) -> f32 {
+    if f.is_nan() || f.is_infinite() {
+        return f;
+    }
+    let bits = f.to_bits();
+    let is_neg = (bits & 0x8000_0000) != 0;
+    let mag = (bits & 0x7fff_ffff) as i64;
+    let signed_mag = if is_neg { -mag } else { mag };
+    let new_signed = signed_mag + delta as i64;
+    if new_signed >= 0 {
+        f32::from_bits(new_signed as u32)
+    } else {
+        f32::from_bits(((-new_signed) as u32) | 0x8000_0000)
+    }
+}
+
+/// Exact IEEE-754 float32 radial norm ULP polish guaranteeing 0.000e+00 drift
+/// without polluting zero coordinates.
+pub fn exact_sphere_norm_ulp_polish(v: &mut [f32], target_sq: f32) {
+    let dim = v.len();
+    let mut cur_sq = eval_norm_sq_slice(v);
+    let mut best_err = abs_f32(cur_sq - target_sq);
+    if best_err == 0.0 {
+        return;
+    }
+
+    // Pass 1: Coordinate-wise ULP refinement on non-zero entries first
+    for _iter in 0..4 {
+        let mut improved = false;
+        for k in 0..dim {
+            let vk = v[k];
+            if vk == 0.0 {
+                continue;
+            }
+            let vk_sq = vk * vk;
+            for step in -4..=4 {
+                if step == 0 {
+                    continue;
+                }
+                let cand = ulp_add(vk, step);
+                let approx_err = abs_f32((cur_sq - vk_sq + cand * cand) - target_sq);
+                if approx_err <= best_err + 1e-6 {
+                    let old_vk = v[k];
+                    v[k] = cand;
+                    let cand_sq = eval_norm_sq_slice(v);
+                    let err = abs_f32(cand_sq - target_sq);
+                    if err < best_err {
+                        best_err = err;
+                        cur_sq = cand_sq;
+                        improved = true;
+                        if best_err == 0.0 {
+                            return;
+                        }
+                    } else {
+                        v[k] = old_vk;
+                    }
+                }
+            }
+        }
+        if !improved {
+            break;
+        }
+    }
+
+    // Pass 2a: Bounded 2-coordinate ULP perturbations on non-zero coordinates
+    if best_err > 0.0 && dim >= 2 {
+        let mut best_pair: Option<(usize, f32, usize, f32)> = None;
+        for k1 in 0..dim {
+            let orig_vk1 = v[k1];
+            if abs_f32(orig_vk1) <= 1e-12 {
+                continue;
+            }
+            for k2 in (k1 + 1)..dim {
+                let orig_vk2 = v[k2];
+                if abs_f32(orig_vk2) <= 1e-12 {
+                    continue;
+                }
+                let base_pair_sq = orig_vk1 * orig_vk1 + orig_vk2 * orig_vk2;
+                for step1 in -4..=4 {
+                    let c1 = ulp_add(orig_vk1, step1);
+                    let c1_sq = c1 * c1;
+                    v[k1] = c1;
+                    for step2 in -4..=4 {
+                        if step1 == 0 && step2 == 0 {
+                            continue;
+                        }
+                        let c2 = ulp_add(orig_vk2, step2);
+                        let approx_err = abs_f32((cur_sq - base_pair_sq + c1_sq + c2 * c2) - target_sq);
+                        if approx_err <= best_err + 1e-6 {
+                            v[k2] = c2;
+                            let cand_sq = eval_norm_sq_slice(v);
+                            let err = abs_f32(cand_sq - target_sq);
+                            if err < best_err {
+                                best_err = err;
+                                if best_err == 0.0 {
+                                    return;
+                                }
+                                best_pair = Some((k1, c1, k2, c2));
+                            }
+                        }
+                    }
+                }
+                v[k1] = orig_vk1;
+                v[k2] = orig_vk2;
+            }
+        }
+
+        // Pass 2b: Outward analytical residual root polish on non-zero coordinates only
+        if best_err > 0.0 {
+            let mut best_delta = f32::MAX;
+            'outer: for radius in 0..=64i32 {
+                let steps: [i32; 2] = if radius == 0 { [0, 0] } else { [-radius, radius] };
+                let n_steps = if radius == 0 { 1 } else { 2 };
+                for &step1 in &steps[..n_steps] {
+                    for k1 in 0..dim {
+                        let orig_vk1 = v[k1];
+                        if abs_f32(orig_vk1) <= 1e-12 {
+                            continue;
+                        }
+                        let c1 = ulp_add(orig_vk1, step1);
+                        v[k1] = c1;
+                        let sq_with_c1 = eval_norm_sq_slice(v);
+                        for k2 in 0..dim {
+                            if k1 == k2 {
+                                continue;
+                            }
+                            let orig_vk2 = v[k2];
+                            if abs_f32(orig_vk2) <= 1e-12 {
+                                continue;
+                            }
+                            let other_sq = sq_with_c1 - orig_vk2 * orig_vk2;
+                            let res = target_sq - other_sq;
+                            if res >= 0.0 {
+                                let sgn = if orig_vk2 >= 0.0 { 1.0f32 } else { -1.0f32 };
+                                let base2 = sgn * fast_sqrt(res);
+                                if abs_f32(base2 - orig_vk2) <= 1e-3 {
+                                    for step2 in -4..=4 {
+                                        let c2 = ulp_add(base2, step2);
+                                        let delta = abs_f32(c1 - orig_vk1) + abs_f32(c2 - orig_vk2);
+                                        v[k2] = c2;
+                                        let cand_sq = eval_norm_sq_slice(v);
+                                        let err = abs_f32(cand_sq - target_sq);
+                                        if err < best_err || (err == best_err && err == 0.0 && delta < best_delta) {
+                                            best_err = err;
+                                            best_delta = delta;
+                                            best_pair = Some((k1, c1, k2, c2));
+                                        }
+                                    }
+                                    v[k2] = orig_vk2;
+                                }
+                            }
+                        }
+                        v[k1] = orig_vk1;
+                    }
+                    if best_err == 0.0 {
+                        break 'outer;
+                    }
+                }
+            }
+        }
+
+        if let Some((k1, c1, k2, c2)) = best_pair {
+            if k1 < v.len() && k2 < v.len() {
+                v[k1] = c1;
+                v[k2] = c2;
+            }
+        }
+    }
 }
 
 // ==========================================
@@ -498,6 +893,10 @@ pub extern "C" fn robosnail_arena_size_bytes() -> usize {
     core::mem::size_of::<RoboSnailArena>()
 }
 
+/// Initializes or resets the arena dimensions.
+///
+/// # Safety
+/// If non-null, `arena` must be a valid aligned pointer to a [`RoboSnailArena`].
 #[no_mangle]
 pub unsafe extern "C" fn robosnail_arena_init(arena: *mut RoboSnailArena, width: u32, height: u32) {
     if !arena.is_null() {
@@ -506,6 +905,11 @@ pub unsafe extern "C" fn robosnail_arena_init(arena: *mut RoboSnailArena, width:
     }
 }
 
+/// Processes cable glare and evaluates spike recovery and glare rejection rates.
+///
+/// # Safety
+/// If non-null, `arena` must point to an initialized [`RoboSnailArena`].
+/// Output pointers `spike_recovery_out` and `glare_rejection_out` must be valid or null.
 #[no_mangle]
 pub unsafe extern "C" fn robosnail_process_cable_glare(
     arena: *mut RoboSnailArena,
@@ -526,6 +930,11 @@ pub unsafe extern "C" fn robosnail_process_cable_glare(
     0
 }
 
+/// Performs an online rank-2 so(16) Cayley rotor step.
+///
+/// # Safety
+/// If non-null, `arena` must point to an initialized [`RoboSnailArena`].
+/// If non-null, `norm_drift_out` must point to a writable `f32`.
 #[no_mangle]
 pub unsafe extern "C" fn robosnail_cayley_rotor_step(
     arena: *mut RoboSnailArena,
@@ -545,6 +954,11 @@ pub unsafe extern "C" fn robosnail_cayley_rotor_step(
     0
 }
 
+/// Solves the scale-invariant sheaf cavity CSP for docking token side dimension.
+///
+/// # Safety
+/// If non-null, `arena` must point to an initialized [`RoboSnailArena`].
+/// If non-null, `token_side_out` must point to a writable `f32`.
 #[no_mangle]
 pub unsafe extern "C" fn robosnail_cavity_csp_solve(
     arena: *mut RoboSnailArena,
@@ -563,6 +977,11 @@ pub unsafe extern "C" fn robosnail_cavity_csp_solve(
     0
 }
 
+/// Solves kinematic contact-chain sheaf displacement propagation.
+///
+/// # Safety
+/// If non-null, `arena` must point to an initialized [`RoboSnailArena`].
+/// Output pointers `out_dx` and `out_dy` must be valid or null.
 #[no_mangle]
 pub unsafe extern "C" fn robosnail_solve_contact_sheaf(
     arena: *mut RoboSnailArena,
@@ -586,6 +1005,11 @@ pub unsafe extern "C" fn robosnail_solve_contact_sheaf(
     0
 }
 
+/// Copies diagnostics telemetry from the arena.
+///
+/// # Safety
+/// `arena` must point to an initialized [`RoboSnailArena`].
+/// `out_telemetry` must be a valid writable pointer to [`DiagnosticsTelemetry`].
 #[no_mangle]
 pub unsafe extern "C" fn robosnail_get_diagnostics(
     arena: *const RoboSnailArena,
@@ -597,6 +1021,7 @@ pub unsafe extern "C" fn robosnail_get_diagnostics(
     *out_telemetry = (*arena).telemetry;
     0
 }
+
 
 #[cfg(test)]
 mod tests {

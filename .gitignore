@@ -11,3 +11,10 @@ dist/
 build/
 .agents/
 .DS_Store
+
+# Lean build artifacts
+.lake/
+*.olean
+*.ilean
+*.c
+

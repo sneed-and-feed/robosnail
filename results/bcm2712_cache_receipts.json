@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0.0",
+  "verifier": "Broadcom BCM2712 Cortex-A76 Hardware Cache Verifier (scripts/verify_bcm2712_arena.py)",
+  "timestamp_utc": "2026-10-25T18:36:16Z",
+  "hardware_target": "Broadcom BCM2712 (Raspberry Pi 5)",
+  "cpu_core": "ARM Cortex-A76 (ARMv8.2-A)",
+  "bcm2712_cache_geometry": {
+    "hardware_target": "Broadcom BCM2712 (Raspberry Pi 5)",
+    "cpu_core": "ARM Cortex-A76 (ARMv8.2-A)",
+    "clock_mhz": 2400,
+    "line_size_bytes": 64,
+    "l1d": {
+      "size_bytes": 65536,
+      "size_kb": 64,
+      "ways": 4,
+      "sets": 256,
+      "line_size_bytes": 64,
+      "policy": "Pseudo-LRU / Tree-PLRU (4-way)"
+    },
+    "l2": {
+      "size_bytes": 524288,
+      "size_kb": 512,
+      "ways": 8,
+      "sets": 1024,
+      "line_size_bytes": 64,
+      "policy": "Pseudo-LRU (8-way private per core)"
+    },
+    "l3": {
+      "size_bytes": 2097152,
+      "size_mb": 2.0,
+      "ways": 16,
+      "sets": 2048,
+      "line_size_bytes": 64,
+      "policy": "Pseudo-LRU / True LRU (16-way shared LLd)"
+    }
+  },
+  "arenas": {
+    "robosnail": {
+      "arena_struct": "RoboSnailArena",
+      "spoke": "robosnail",
+      "description": "Embodied Robotics Spoke: Contact-Chain Sheaf, 2mm Cable Glare Filter, and so(16) Cayley Rotor TTT",
+      "arena_size_bytes": 731456,
+      "arena_size_kb": 714.3125,
+      "arena_max_ceiling_bytes": 2097152,
+      "arena_alignment_bytes": 64,
+      "total_references": 50000000,
+      "simulation_wall_time_sec": 1.6325,
+      "throughput_refs_per_sec": 30627486.8,
+      "l1d": {
+        "hits": 18972573,
+        "misses": 31027427,
+        "hit_rate_pct": 37.95
+      },
+      "l2": {
+        "hits": 21209307,
+        "misses": 9818120,
+        "hit_rate_pct": 68.36
+      },
+      "l3": {
+        "hits": 9806691,
+        "misses": 11429,
+        "hit_rate_pct": 99.88
+      },
+      "lld_miss_rate_pct": 0.02286,
+      "target_lld_miss_rate_pct": 0.05,
+      "target_achieved": true,
+      "allocator_static_audit": {
+        "audited": true,
+        "target_binary": "c:/Users/x/Documents/antigravity/robosnail/target/release/robosnail_rs.dll",
+        "heap_allocators_imported": [],
+        "stepping_symbols_verified": [
+          "robosnail_arena_size_bytes",
+          "robosnail_arena_init",
+          "robosnail_process_cable_glare",
+          "robosnail_cayley_rotor_step",
+          "robosnail_cavity_csp_solve",
+          "robosnail_solve_contact_sheaf",
+          "robosnail_get_diagnostics"
+        ],
+        "stealth_symbols_verified": [],
+        "dynamic_allocations_detected": 0,
+        "status": "ZERO_DYNAMIC_ALLOCATIONS_VERIFIED"
+      }
+    }
+  },
+  "summary": {
+    "total_arenas_verified": 1,
+    "total_references_simulated": 50000000,
+    "mean_lld_miss_rate_pct": 0.02286,
+    "max_lld_miss_rate_pct": 0.02286,
+    "target_threshold_pct": 0.05,
+    "all_cache_targets_passed": true,
+    "all_allocator_audits_passed": true,
+    "overall_verification_status": "PASS"
+  }
+}
