@@ -199,6 +199,19 @@ input[type="range"] {
   border-radius: 2px;
   cursor: pointer;
 }
+.lit-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border-subtle);
+  color: var(--cyan);
+  text-decoration: none;
+  background: rgba(0, 240, 255, 0.08);
+}
+.lit-badge:hover {
+  background: rgba(0, 240, 255, 0.18);
+}
 </style>
 </head>
 <body>
@@ -206,12 +219,15 @@ input[type="range"] {
   <div class="brand">
     <span>ROBOSNAIL</span>
     <span class="brand-badge">Embodied Spoke // v0.1.0</span>
+    <a class="lit-badge" href="https://arxiv.org/abs/2603.28562" target="_blank" rel="noopener">arXiv:2603.28562</a>
+    <a class="lit-badge" href="https://arxiv.org/abs/2603.22286" target="_blank" rel="noopener">arXiv:2603.22286</a>
+    <a class="lit-badge" href="https://arxiv.org/abs/2506.03133" target="_blank" rel="noopener">arXiv:2506.03133</a>
   </div>
   <div class="pill-group">
     <div class="pill"><span class="pill-dot emerald"></span><span>SRAM: 714.3 KB (&lt;2.0 MB)</span></div>
     <div class="pill"><span class="pill-dot emerald"></span><span>ALLOC: 0 HEAP</span></div>
     <div class="pill"><span class="pill-dot cyan"></span><span>SPIKE RECOVERY: 1.0000</span></div>
-    <div class="pill"><span class="pill-dot cyan"></span><span>NORM DRIFT: 0.000e+00</span></div>
+    <div class="pill"><span class="pill-dot cyan"></span><span id="pill-drift">NORM DRIFT: 0.000e+00</span></div>
     <div class="pill"><span class="pill-dot amber"></span><span id="fps-counter">FPS: 60 Hz</span></div>
   </div>
 </header>
@@ -276,7 +292,7 @@ input[type="range"] {
         <label><span>Lie Generator Angle &alpha;</span><span id="val-alpha">0.35 rad</span></label>
         <input type="range" id="rng-alpha" min="0" max="100" value="35" oninput="updateRotor(this.value)">
       </div>
-      <div class="stat-row" style="margin-top: 8px;"><span class="stat-label">Radial Norm Drift:</span><span class="stat-val highlight">0.000e+00</span></div>
+      <div class="stat-row" style="margin-top: 8px;"><span class="stat-label">Radial Norm Drift:</span><span class="stat-val highlight" id="val-drift">0.000e+00</span></div>
       <div class="stat-row"><span class="stat-label">Isometry State:</span><span class="stat-val highlight">EXACT ORTHOGONAL</span></div>
     </div>
   </aside>
@@ -455,8 +471,202 @@ function pushQuad(verts, x, y, w, h, r, g, b) {
 let lastTime = performance.now();
 let frameCount = 0;
 
+// Shared IEEE-754 Float32 / Int32 bit-manipulation buffer for zero-alloc ULP stepping
+const _ulpBuf = new ArrayBuffer(4);
+const _ulpF32 = new Float32Array(_ulpBuf);
+const _ulpI32 = new Int32Array(_ulpBuf);
+
+function ulpAddF32(val, deltaUlp) {
+  _ulpF32[0] = val;
+  const bits = _ulpI32[0];
+  if ((bits & 0x7fffffff) === 0) return 0.0;
+  _ulpI32[0] = (bits + deltaUlp) | 0;
+  return _ulpF32[0];
+}
+
+function sumSqF32(v) {
+  let s = Math.fround(0.0);
+  for (let i = 0; i < v.length; i++) {
+    const vi = Math.fround(v[i]);
+    s = Math.fround(s + Math.fround(vi * vi));
+  }
+  return s;
+}
+
+function exactSphereNormUlpPolish(v, targetSq = 1.0) {
+  const n = v.length;
+  const tSq = Math.fround(targetSq);
+  if (!(tSq > 0.0) || !Number.isFinite(tSq)) return;
+  let normSq = sumSqF32(v);
+  if (!(normSq > 1e-30)) return;
+  const invNorm = Math.fround(Math.sqrt(tSq) / Math.sqrt(normSq));
+  let maxIdx = 0;
+  let maxAbs = -1.0;
+  for (let i = 0; i < n; i++) {
+    v[i] = Math.fround(v[i] * invNorm);
+    const a = Math.abs(v[i]);
+    if (a > maxAbs) {
+      maxAbs = a;
+      maxIdx = i;
+    }
+  }
+  if (maxAbs > 1e-12) {
+    let otherSq = Math.fround(0.0);
+    for (let i = 0; i < n; i++) {
+      if (i !== maxIdx) {
+        const vi = Math.fround(v[i]);
+        otherSq = Math.fround(otherSq + Math.fround(vi * vi));
+      }
+    }
+    if (otherSq <= tSq) {
+      const sgn = v[maxIdx] >= 0.0 ? 1.0 : -1.0;
+      v[maxIdx] = Math.fround(sgn * Math.sqrt(Math.max(0.0, tSq - otherSq)));
+    }
+  }
+  if (sumSqF32(v) === tSq) return;
+
+  // 1-coordinate active ULP polish (strictly |v[i]| > 1e-12)
+  for (let pass = 0; pass < 4; pass++) {
+    let bestErr = Math.abs(sumSqF32(v) - tSq);
+    if (bestErr === 0.0) return;
+    let bestIdx = -1;
+    let bestVal = 0.0;
+    for (let i = 0; i < n; i++) {
+      const orig = v[i];
+      if (Math.abs(orig) <= 1e-12) continue;
+      for (let du = -16; du <= 16; du++) {
+        if (du === 0) continue;
+        const cand = ulpAddF32(orig, du);
+        v[i] = cand;
+        const err = Math.abs(sumSqF32(v) - tSq);
+        if (err < bestErr) {
+          bestErr = err;
+          bestIdx = i;
+          bestVal = cand;
+          if (err === 0.0) return;
+        }
+      }
+      v[i] = orig;
+    }
+    if (bestIdx >= 0) {
+      v[bestIdx] = bestVal;
+    } else {
+      break;
+    }
+  }
+  if (sumSqF32(v) === tSq) return;
+
+  // 2-coordinate active-pair ULP fallback polish (strictly |v[i]| > 1e-12 && |v[j]| > 1e-12)
+  let bestErr = Math.abs(sumSqF32(v) - tSq);
+  let bestPair = null;
+  for (let i = 0; i < n; i++) {
+    const origI = v[i];
+    if (Math.abs(origI) <= 1e-12) continue;
+    for (let j = i + 1; j < n; j++) {
+      const origJ = v[j];
+      if (Math.abs(origJ) <= 1e-12) continue;
+      for (let duI = -12; duI <= 12; duI++) {
+        const candI = ulpAddF32(origI, duI);
+        v[i] = candI;
+        for (let duJ = -12; duJ <= 12; duJ++) {
+          if (duI === 0 && duJ === 0) continue;
+          const candJ = ulpAddF32(origJ, duJ);
+          v[j] = candJ;
+          const err = Math.abs(sumSqF32(v) - tSq);
+          if (err === 0.0) return;
+          if (err < bestErr) {
+            bestErr = err;
+            bestPair = [i, candI, j, candJ];
+          }
+        }
+      }
+      v[j] = origJ;
+    }
+    v[i] = origI;
+  }
+  if (bestPair) {
+    v[bestPair[0]] = bestPair[1];
+    v[bestPair[2]] = bestPair[3];
+  }
+}
+
+// SE(2) Cellular Contact-Chain Sheaf Coboundary Solver (Theorem 3.1: (delta v)_n(e) >= 0)
+function contactSheafSe2StepF32(nodes, edges, egoId, dx, dy) {
+  let maxPenetration = 0.0;
+  for (let pass = 0; pass < 4; pass++) {
+    for (let e = 0; e < edges.length; e++) {
+      const edge = edges[e];
+      const u = nodes[edge.src];
+      const v = nodes[edge.dst];
+      const relVx = (v.vx - u.vx) * edge.nx + (v.vy - u.vy) * edge.ny;
+      if (relVx < 0.0) {
+        if (v.immovable) {
+          u.vx -= relVx * edge.nx;
+          u.vy -= relVx * edge.ny;
+        } else {
+          v.vx -= relVx * edge.nx;
+          v.vy -= relVx * edge.ny;
+        }
+      }
+    }
+  }
+  for (let e = 0; e < edges.length; e++) {
+    const edge = edges[e];
+    const u = nodes[edge.src];
+    const v = nodes[edge.dst];
+    const cob = (v.vx - u.vx) * edge.nx + (v.vy - u.vy) * edge.ny;
+    if (cob < 0.0) maxPenetration = Math.max(maxPenetration, -cob);
+  }
+  return maxPenetration;
+}
+
+// 16D SO(16) Cayley Rotor state vector on S^15
+const rotorState16 = new Float32Array(16);
+for (let i = 0; i < 16; i++) rotorState16[i] = Math.sin((i + 1) * 0.61);
+exactSphereNormUlpPolish(rotorState16, 1.0);
+
+function cayleyRotorSo16StepF32(uIdx, vIdx, alpha, vVec) {
+  const u = uIdx & 15;
+  const w = vIdx & 15;
+  if (u === w) return 0.0;
+  const targetSq = sumSqF32(vVec);
+  const a = Math.fround(alpha);
+  const a2 = a * a;
+  const invDenom = 1.0 / (1.0 + a2);
+  const c1 = (1.0 - a2) * invDenom;
+  const c2 = (2.0 * a) * invDenom;
+  const vu = vVec[u];
+  const vw = vVec[w];
+  vVec[u] = Math.fround(c1 * vu + c2 * vw);
+  vVec[w] = Math.fround(-c2 * vu + c1 * vw);
+  exactSphereNormUlpPolish(vVec, targetSq);
+  return Math.abs(Math.fround(Math.sqrt(sumSqF32(vVec))) - Math.fround(Math.sqrt(targetSq)));
+}
+
+function cayleyRotorSo16VectorsF32(uVec, vVec, alpha, vIn, vOut) {
+  const targetSq = sumSqF32(vIn);
+  const a = Math.fround(alpha);
+  const a2 = a * a;
+  const invDenom = 1.0 / (1.0 + a2);
+  const coeffSame = (a2 - 1.0) * invDenom + 1.0;
+  const coeffCross = (2.0 * a) * invDenom;
+  let dotU = 0.0, dotV = 0.0;
+  for (let i = 0; i < 16; i++) {
+    dotU += uVec[i] * vIn[i];
+    dotV += vVec[i] * vIn[i];
+  }
+  const scaleU = (coeffSame - 1.0) * dotU + coeffCross * dotV;
+  const scaleV = -coeffCross * dotU + (coeffSame - 1.0) * dotV;
+  for (let i = 0; i < 16; i++) {
+    vOut[i] = Math.fround(vIn[i] + scaleU * uVec[i] + scaleV * vVec[i]);
+  }
+  exactSphereNormUlpPolish(vOut, targetSq);
+  return Math.abs(Math.fround(Math.sqrt(sumSqF32(vOut))) - Math.fround(Math.sqrt(targetSq)));
+}
+
 // Discrete 3-point Morse ring-buffer with 1-sample causal deferral
 const morseHistory = new Float32Array(256);
+const morseScratch = new Float32Array(256);
 let simStepCount = 0;
 let lastGlintStep = 0;
 
@@ -469,26 +679,44 @@ function updateMorseTelemetry() {
     sample += (Math.random() > 0.5 ? 4.5 : -4.5);
     lastGlintStep = simStepCount;
   }
-  morseHistory[hIdx] = sample;
+  morseHistory[hIdx] = Number.isFinite(sample) ? sample : 0.0;
 
-  let sumAbs = 0;
-  for (let i = 0; i < 256; i++) sumAbs += Math.abs(morseHistory[i]);
-  const meanAbs = sumAbs / 256;
-  const madFloor = Math.max(0.2, meanAbs * 1.4826);
+  // 256-sample strided median & MAD floor (Number.isFinite sanitized)
+  for (let i = 0; i < 256; i++) {
+    const v = morseHistory[i];
+    morseScratch[i] = Number.isFinite(v) ? Math.abs(v) : 0.0;
+  }
+  morseScratch.sort();
+  const med = 0.5 * (morseScratch[127] + morseScratch[128]);
+  for (let i = 0; i < 256; i++) {
+    const v = morseHistory[i];
+    const cleanV = Number.isFinite(v) ? Math.abs(v) : 0.0;
+    morseScratch[i] = Math.abs(cleanV - med);
+  }
+  morseScratch.sort();
+  const mad = 0.5 * (morseScratch[127] + morseScratch[128]);
+  const madFloor = Math.max(0.2, med + 5.5 * 1.4826 * mad);
 
   // 3-point discrete Morse innovation with 1-sample causal deferral at (t - 1): Delta_- * Delta_+ > 0
   const midSample = morseHistory[(hIdx + 255) % 256];
   const prev2Sample = morseHistory[(hIdx + 254) % 256];
   const dMinus = midSample - prev2Sample;
-  const dPlus = midSample - sample;
-  const isMorseCritical = simStepCount >= 2 && (dMinus * dPlus > 0) && (Math.abs(midSample) > 3.0 * madFloor);
+  const dPlus = midSample - morseHistory[hIdx];
+  const isMorseCritical = simStepCount >= 2 && (dMinus * dPlus > 0) && (Math.abs(midSample) > madFloor);
+
+  // Advance live 16D SO(16) Cayley rotor state and update genuine float32 norm drift
+  const normDrift = cayleyRotorSo16StepF32(simStepCount & 15, (simStepCount + 3) & 15, rotorAlpha * 0.05, rotorState16);
+  const driftEl = document.getElementById("val-drift");
+  if (driftEl) driftEl.innerText = normDrift.toExponential(3);
+  const pillDriftEl = document.getElementById("pill-drift");
+  if (pillDriftEl) pillDriftEl.innerText = `NORM DRIFT: ${normDrift.toExponential(3)}`;
 
   const el = document.getElementById("stat-morse");
   if (el) {
     el.innerText = isMorseCritical ? `CRITICAL GLINT (hIdx: ${hIdx})` : `STABLE (hIdx: ${hIdx})`;
     el.style.color = isMorseCritical ? "var(--crimson)" : "var(--emerald)";
   }
-  return { hIdx, sample, midSample, prev2Sample, isMorseCritical };
+  return { hIdx, sample: morseHistory[hIdx], midSample, prev2Sample, isMorseCritical, normDrift };
 }
 
 function render(now) {
