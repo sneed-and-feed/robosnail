@@ -9,7 +9,7 @@
 **RoboSnail** is the embodied robotics and physical manipulation spoke of **Project DarkSnail**. It provides an allocation-free `#![no_std]` Rust arena kernel (`RoboSnailArena`), ROS 2 C-ABI bindings, a Python evaluation harness, and a zero-dependency single-file WebGL2 3D tactical simulation studio (`studio/robosnail_portable_studio.html`) for relational contact-graph predicate induction, $\mathrm{SE}(2)/\mathrm{SE}(3)$ kinematic contact-chain sheaf propagation, 2mm thin-cable specular floor glare suppression, scale-invariant sheaf cavity docking, and online Rank-2 $\mathfrak{so}(16)$ Cayley rotor Test-Time Training (TTT).
 
 - **Remote Repository**: `https://github.com/sneed-and-feed/robosnail`
-- **Machine-Checked Foundation**: [`formalization/OcclusionTriad.lean`](formalization/OcclusionTriad.lean) (`982` lines, `0 sorry`, `0` custom axioms)
+- **Machine-Checked Foundation**: [`formalization/OcclusionTriad.lean`](formalization/OcclusionTriad.lean) (`815` lines, `0 sorry`, `0` custom axioms)
 - **Architecture Specification**: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
 ---
@@ -124,7 +124,7 @@ Measured results from [`results/robosnail_evaluation_summary.json`](results/robo
 | Online Rank-2 $\mathfrak{so}(16)$ Cayley Rotor Drift | `0.000e+00` | $\le 1.0\text{e}-6$ | PASS |
 | Scale-Invariant Cavity CSP Error (`S_ref` in `{8, 10}`) | `0.000e+00` ($S_{\text{tok}} \in \lbrace 4.0, 6.0 \rbrace$) | $\le 1.0\text{e}-4$ | PASS |
 | Kinematic Contact-Chain Sheaf & Wall Lock | Exact Push, Nesting & `(0.0, 0.0)` Lock | Unilateral $\delta\mathbf v(e) \ge 0$ | PASS |
-| Lean 4 Formalization (`OcclusionTriad.lean`) | `0 sorry`, `0` custom axioms (`982` lines) | `0 sorry` | PASS |
+| Lean 4 Formalization (`OcclusionTriad.lean`) | `0 sorry`, `0` custom axioms (`815` lines) | `0 sorry` | PASS |
 | Automated Test Suites (`cargo test` & `pytest`) | `5 / 5` Rust + `5 / 5` Python passed | `100%` pass | PASS |
 
 ---
@@ -140,7 +140,7 @@ robosnail/
 ├── docs/
 │   └── ARCHITECTURE.md                     # Detailed mathematical & systems architecture
 ├── formalization/
-│   └── OcclusionTriad.lean                 # Lean 4 machine-checked proofs (982 lines, 0 sorry)
+│   └── OcclusionTriad.lean                 # Lean 4 machine-checked proofs (815 lines, 0 sorry)
 ├── rust/
 │   └── robosnail_rs/
 │       ├── Cargo.toml                      # #![no_std] cdylib/rlib crate configuration
@@ -150,7 +150,9 @@ robosnail/
 │   ├── __init__.py                         # Python package exports
 │   └── arena.py                            # C-ABI ctypes bridge & reference fallback
 ├── scripts/
-│   └── audit_gfm_math.py                   # 21-rule GitHub Flavored Markdown & KaTeX linter
+│   ├── audit_gfm_math.py                   # 21-rule GitHub Flavored Markdown & KaTeX linter
+│   ├── evaluate_robosnail.py               # Live evaluation & receipt generator
+│   └── verify_bcm2712_arena.py             # Broadcom BCM2712 Cortex-A76 cache hierarchy verifier
 ├── studio/
 │   └── robosnail_portable_studio.html      # Zero-dependency 60 Hz WebGL2 3D robotics studio
 ├── tests/
